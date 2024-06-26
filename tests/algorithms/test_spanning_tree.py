@@ -234,7 +234,7 @@ def test_ransac_spanning_trees() -> None:
     # fmt: on
 
     # RANSAC module for Spanning Tree fitting produces Sim(2) objects, so conversion will be required for comparison.
-    wSi_list = spanning_tree.ransac_spanning_trees(
+    wSi_list, inlier_measurements = spanning_tree.ransac_spanning_trees(
         high_conf_measurements, num_hypotheses=10, min_num_edges_for_hypothesis=3, visualize=False
     )
 

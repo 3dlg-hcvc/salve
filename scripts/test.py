@@ -24,7 +24,8 @@ from salve.utils.logger_utils import get_logger
 
 
 logger = get_logger()
-SALVE_CONFIGS_ROOT = Path(__file__).resolve().parent.parent / "salve" / "configs"
+# SALVE_CONFIGS_ROOT = Path(__file__).resolve().parent.parent / "salve" / "configs"
+SALVE_CONFIGS_ROOT = Path(__file__).resolve().parent.parent / "configs"
 
 
 class PrecisionRecallMeter:
@@ -269,7 +270,7 @@ def run_test_epoch(
         "split": split,
         "checkpoint_file_path": ckpt_fpath,
         "average_accuracy": avg_mAcc,
-        "class_accuracies": accs,
+        "class_accuracies": accs.tolist(),
         "precision": prec,
         "recall": rec,
         "mean_accuracy": mAcc,
@@ -290,7 +291,7 @@ def evaluate_model(
     model.eval()
     metrics_dict = run_test_epoch(
         args=args,
-        serialization_save_dir=serialization_save_dir,
+        serialization_save_dir=os.path.join(serialization_save_dir, "serialization"),
         ckpt_fpath=ckpt_fpath,
         model=model,
         data_loader=data_loader,
@@ -298,7 +299,9 @@ def evaluate_model(
         save_viz=save_viz,
     )
 
-    results_summary_fpath = f"{Path(ckpt_fpath).stem}.json"
+    for k, v in metrics_dict.items(): print(f"{k}: {v}, {type(v)}")
+
+    results_summary_fpath = os.path.join(serialization_save_dir, f"{Path(ckpt_fpath).stem}.json")
     print(f"Saving {split} split accuracy summary to {results_summary_fpath}")
     io_utils.save_json_file(json_fpath=results_summary_fpath, data=metrics_dict)
 
@@ -367,9 +370,10 @@ def run_evaluate_model(
         raise FileNotFoundError("Model checkpoint file path should end in .pth.")
 
     if not Path(f"{SALVE_CONFIGS_ROOT}/{config_name}").exists():
+    # if not Path(f"{config_name}").exists():
         raise FileNotFoundError(f"No config found at `{SALVE_CONFIGS_ROOT}/{config_name}`.")
 
-    with hydra.initialize_config_module(config_module="salve.configs"):
+    with hydra.initialize_config_module(config_module="configs", version_base=None):
         # Note: config is relative to the `salve` module.
         cfg = hydra.compose(config_name=config_name)
         args = instantiate(cfg.TrainingConfig)

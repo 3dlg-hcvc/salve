@@ -110,11 +110,11 @@ def render_building_floor_pairs(
 
     if multiprocess_building_panos and num_processes > 1:
         with Pool(num_processes) as p:
-            p.starmap(generate_texture_maps_for_pair, args)
+            p.starmap(bev_rendering_utils.generate_texture_maps_for_pair, args)
 
     else:
         for single_call_args in args:
-            generate_texture_maps_for_pair(*single_call_args)
+            bev_rendering_utils.generate_texture_maps_for_pair(*single_call_args)
 
 
 def render_pairs(

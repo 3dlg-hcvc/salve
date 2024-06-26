@@ -604,8 +604,10 @@ def generate_texture_maps_for_pair(
         )
         args = SimpleNamespace(
             **{
-                "img_i1": semantic_img1_fpath if is_semantics else img1_fpath,
-                "img_i2": semantic_img2_fpath if is_semantics else img2_fpath,
+                "img_i1": img1_fpath,
+                # "img_i1": semantic_img1_fpath if is_semantics else img1_fpath,
+                "img_i2": img2_fpath,
+                # "img_i2": semantic_img2_fpath if is_semantics else img2_fpath,
                 "depth_i1": f"{depth_save_root}/{building_id}/{Path(img1_fpath).stem}.depth.png",
                 "depth_i2": f"{depth_save_root}/{building_id}/{Path(img2_fpath).stem}.depth.png",
                 "scale": 0.001,
@@ -616,14 +618,18 @@ def generate_texture_maps_for_pair(
         )
         # bev_img = bev_rendering_utils.vis_depth_and_render(args, is_semantics=False)
 
+        # print(f"img1: {img1_fpath}, img2: {img2_fpath}, surface_type: {surface_type}")
+        # print(f"bev_img1: {bev_fpath1}, bev_img2: {bev_fpath2}, surface_type: {surface_type}")
+
         if Path(bev_fpath1).exists() and Path(bev_fpath2).exists():
             print("Both BEV images already exist, skipping...")
             return
 
-        bev_img1, bev_img2 = bev_rendering_utils.render_bev_pair(
+        bev_img1, bev_img2 = render_bev_pair(
             args, building_id, floor_id, i1, i2, i2Ti1, is_semantics=False
         )
         if bev_img1 is None or bev_img2 is None:
+            # print("skipping...")
             return
 
         imageio.imwrite(bev_fpath1, bev_img1)

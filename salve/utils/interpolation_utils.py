@@ -46,10 +46,13 @@ def interp_dense_grid_from_sparse(
     interp_rgb_vals = scipy.interpolate.griddata(
         points=points[:, :2], values=rgb_values, xi=grid_coords, method="nearest" if is_semantics else "linear"
     )  # ) # # or method='linear', method='cubic'
+    # import pdb; pdb.set_trace()
+    interp_rgb_vals[np.isnan(interp_rgb_vals)] = 0
 
     # can swap axes arbitrarily
     Y = grid_coords[:, 1].astype(np.int32)
     X = grid_coords[:, 0].astype(np.int32)
+    # print(np.isnan(interp_rgb_vals).all())
     bev_img[Y, X, :] = interp_rgb_vals
     return bev_img
 

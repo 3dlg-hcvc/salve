@@ -1,5 +1,7 @@
 
 .DS_Store
+.pytest_cache
+.vscode
 
 __pycache__/
 
@@ -7,3 +9,14 @@ salve.egg-info/
 
 # data files
 2021_*
+
+notebook
+src
+output
+configs
+ckpts
+<TemporaryDirectory '
+
+*.log
+*.speescope
+requirements.txt
