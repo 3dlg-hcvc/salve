@@ -136,6 +136,9 @@ class PanoData:
         coord_frame: str,
         show_plot: bool = True,
         scale_meters_per_coordinate: Optional[float] = None,
+        vis_camera: bool = True,
+        vis_id: bool = True,
+        vis_label: bool = True
     ) -> None:
         """Plot the room shape in BEV (either in a global or local frame) for the room where a panorama was captured.
 
@@ -175,28 +178,30 @@ class PanoData:
 
         # Plot the location of each panorama, with an arrow pointing in the +y direction.
         # The +y direction corresponds to the center column of the pano.
-        pano_position = np.zeros((1, 2))
-        if coord_frame in ["worldnormalized", "worldmetric"]:
-            pano_position_local = pano_position
-            pano_position_world = self.global_Sim2_local.transform_from(pano_position_local)
-            pano_position = pano_position_world * scale_meters_per_coordinate
+        if vis_camera:
+            pano_position = np.zeros((1, 2))
+            if coord_frame in ["worldnormalized", "worldmetric"]:
+                pano_position_local = pano_position
+                pano_position_world = self.global_Sim2_local.transform_from(pano_position_local)
+                pano_position = pano_position_world * scale_meters_per_coordinate
 
-        plt.scatter(pano_position[0, 0], pano_position[0, 1], 30, marker="+", color=color)
+            plt.scatter(pano_position[0, 0], pano_position[0, 1], 30, marker="+", color=color)
 
-        point_ahead = np.array([0, 1]).reshape(1, 2)
-        if coord_frame in ["worldnormalized", "worldmetric"]:
-            point_ahead = self.global_Sim2_local.transform_from(point_ahead) * scale_meters_per_coordinate
+            point_ahead = np.array([0, 1]).reshape(1, 2)
+            if coord_frame in ["worldnormalized", "worldmetric"]:
+                point_ahead = self.global_Sim2_local.transform_from(point_ahead) * scale_meters_per_coordinate
 
-        plt.plot([pano_position[0, 0], point_ahead[0, 0]], [pano_position[0, 1], point_ahead[0, 1]], color=color)
+            plt.plot([pano_position[0, 0], point_ahead[0, 0]], [pano_position[0, 1], point_ahead[0, 1]], color=color)
 
         # Render the panorama ID near the panorama's location.
         # Add a small amount of jitter (from truncated standard normal) so that panorama marker and text don't overlap.
-        pano_id = self.id
-        pano_text = self.label + f" {pano_id}"
-        TEXT_LEFT_OFFSET = 0.15
-        noise = np.clip(np.random.randn(2), a_min=-0.05, a_max=0.05)
-        text_loc = pano_position[0] + noise
-        plt.text((text_loc[0] - TEXT_LEFT_OFFSET), text_loc[1], pano_text, color=color, fontsize="xx-small")
+        if vis_id:
+            pano_id = self.id
+            pano_text = self.label + f" {pano_id}"
+            TEXT_LEFT_OFFSET = 0.15
+            noise = np.clip(np.random.randn(2), a_min=-0.05, a_max=0.05)
+            text_loc = pano_position[0] + noise
+            plt.text((text_loc[0] - TEXT_LEFT_OFFSET), text_loc[1], pano_text, color=color, fontsize="xx-small")
 
         # For each W/D/O, render the start and end vertices.
         for wdo_idx, wdo in enumerate(self.doors + self.windows + self.openings):
@@ -208,7 +213,10 @@ class PanoData:
             wdo_type = wdo.type
             wdo_color = WDO_COLOR_DICT[wdo_type]
             label = wdo_type
-            plt.scatter(wdo_points[:, 0], wdo_points[:, 1], 10, color=wdo_color, marker="o", label=label)
+            if vis_label:
+                plt.scatter(wdo_points[:, 0], wdo_points[:, 1], 10, color=wdo_color, marker="o", label=label)
+            else:
+                plt.scatter(wdo_points[:, 0], wdo_points[:, 1], 10, color=wdo_color, marker="o")
             plt.plot(wdo_points[:, 0], wdo_points[:, 1], color=wdo_color, linestyle="dotted")
 
         if show_plot:

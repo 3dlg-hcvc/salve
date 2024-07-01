@@ -8,7 +8,7 @@ __pycache__/
 salve.egg-info/
 
 # data files
-2021_*
+serialization*
 
 notebook
 src

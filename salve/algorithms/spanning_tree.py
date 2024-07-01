@@ -19,6 +19,8 @@ from salve.common.edge_classification import EdgeClassification
 from salve.common.posegraph2d import PoseGraph2d, ENDCOLOR, REDTEXT
 from salve.common.sim2 import Sim2
 
+import networkx as nx
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,6 +71,65 @@ def greedily_construct_st(i2Ri1_dict: Dict[Tuple[int, int], np.ndarray]) -> List
 
     return wRi_list
 
+def greedily_construct_all_st_Sim2(
+    i2Si1_dict: Dict[Tuple[int, int], Sim2], verbose: bool = True
+):
+    edges = i2Si1_dict.keys()
+
+    if len(edges) == 0:
+        return None
+    
+    num_nodes = max([max(i1, i2) for i1, i2 in edges]) + 1
+
+    cc_nodes_list = []
+
+    input_graph = nx.Graph()
+    input_graph.add_edges_from(edges)
+
+    connected_ccs = sorted(nx.connected_components(input_graph), key=len, reverse=True)
+    for cc in connected_ccs:
+        subgraph = input_graph.subgraph(cc).copy()
+        cc_nodes_list.append(list(subgraph.nodes()))
+
+    wSi_lists = []
+    for cc_nodes in cc_nodes_list:
+        cc_nodes = sorted(cc_nodes)
+
+        wSi_list = [None] * num_nodes
+
+        # Choose origin node.
+        origin_node = cc_nodes[0]
+        wSi_list[origin_node] = Sim2(R=np.eye(2), t=np.zeros(2), s=1.0)
+
+        G = nx.Graph()
+        G.add_edges_from(edges)
+
+        # Ignore 0th node, as we already set its global pose as the origin.
+        for dst_node in cc_nodes[1:]:
+
+            # Determine the path to this node from the origin. ordered from [origin_node,...,dst_node]
+            path = nx.shortest_path(G, source=origin_node, target=dst_node)
+
+            if verbose:
+                print(f"\tPath from {origin_node}->{dst_node}: {str(path)}")
+
+            wSi = Sim2(R=np.eye(2), t=np.zeros(2), s=1.0)
+            for (i1, i2) in zip(path[:-1], path[1:]):
+
+                # i1, i2 may not be in sorted order here. May need to reverse ordering
+                if i1 < i2:
+                    i1Si2 = i2Si1_dict[(i1, i2)].inverse()  # use inverse
+                else:
+                    i1Si2 = i2Si1_dict[(i2, i1)]
+
+                # wRi = wR0 * 0R1
+                wSi = wSi.compose(i1Si2)
+
+            wSi_list[dst_node] = wSi
+
+        wSi_lists.append(wSi_list)
+    
+    return wSi_lists
 
 def greedily_construct_st_Sim2(
     i2Si1_dict: Dict[Tuple[int, int], Sim2], verbose: bool = True

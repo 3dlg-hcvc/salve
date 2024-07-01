@@ -468,6 +468,30 @@ def run_incremental_reconstruction(
             )
             reconstruction_reports.append(report)
 
+            #visualize all subgraphs
+            est_floor_pose_graphs = []
+            wSi_lists = spanning_tree.greedily_construct_all_st_Sim2(i2Si1_dict, verbose=False)
+            for wSi_list in wSi_lists:
+                wSi_list = pose2_slam.execute_planar_slam(
+                    measurements=high_conf_inlier_measurements,
+                    gt_floor_pg=gt_floor_pose_graph,
+                    hypotheses_save_root=hypotheses_save_root,
+                    building_id=building_id,
+                    floor_id=floor_id,
+                    wSi_list=wSi_list,
+                    plot_save_dir=plot_save_dir,
+                    optimize_poses_only="pgo" == method,
+                    use_axis_alignment=use_axis_alignment,
+                    per_edge_wdo_dict=per_edge_wdo_dict,
+                    inferred_floor_pose_graph=inferred_floor_pose_graph,
+                )
+                est_floor_pose_graph = PoseGraph2d.from_wSi_list(wSi_list, gt_floor_pose_graph)
+                est_floor_pose_graphs.append(est_floor_pose_graph)
+            
+            FloorReconstructionReport.visualize_all_set_floor_pose_graph(
+                est_floor_pose_graphs, gt_floor_pose_graph, plot_save_dir=plot_save_dir)
+
+
         elif method == "random_spanning_trees":
             # Generate 100 spanning trees.
 

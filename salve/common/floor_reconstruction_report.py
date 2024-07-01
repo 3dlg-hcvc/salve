@@ -148,6 +148,47 @@ class FloorReconstructionReport:
             translation_errors=trans_errors,
         )
 
+    @classmethod
+    def visualize_all_set_floor_pose_graph(
+        cls,
+        est_floor_pose_graphs: List[PoseGraph2d],
+        gt_floor_pose_graph: PoseGraph2d,
+        plot_save_dir: str,
+    ):
+        
+        num_graph = len(est_floor_pose_graphs)
+        aligned_est_floor_pose_graphs = []
+
+        for est_floor_pose_graph in est_floor_pose_graphs:
+            aligned_est_floor_pose_graph, _ = est_floor_pose_graph.align_by_Sim3_to_ref_pose_graph(
+                ref_pose_graph=gt_floor_pose_graph
+            )
+            aligned_est_floor_pose_graphs.append(aligned_est_floor_pose_graph)
+
+        building_id = gt_floor_pose_graph.building_id
+        floor_id = gt_floor_pose_graph.floor_id
+
+        plt.suptitle("leftmost: GT floorplan. Right: estimated floorplans.")
+        ax1 = plt.subplot(1, num_graph+1, 1)
+        render_floorplan(gt_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                         vis_camera=False, vis_id=False, vis_label=False)
+        ax1.set_aspect("equal")
+        # matplotlib_utils.legend_without_duplicate_labels(ax1)
+
+        for i, aligned_est_floor_pose_graph in enumerate(aligned_est_floor_pose_graphs):
+            ax = plt.subplot(1, num_graph+1, i+2, sharex=ax1, sharey=ax1)
+            render_floorplan(aligned_est_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                             vis_camera=False, vis_id=False, vis_label=False)
+            ax.set_aspect("equal")
+            if i == 0:
+                plt.title(f"Building {building_id}, {floor_id}")
+            # matplotlib_utils.legend_without_duplicate_labels(ax)
+
+        os.makedirs(plot_save_dir, exist_ok=True)
+        save_fpath = f"{plot_save_dir}/{building_id}_{floor_id}_all.jpg"
+
+        plt.savefig(save_fpath, dpi=500)
+        plt.close("all")
 
 def render_rasterized_room_clustering(
     inferred_aligned_pg: PoseGraph2d, plot_save_dir: str, scale_meters_per_coordinate: float
@@ -338,7 +379,7 @@ def rasterize_room(
     return occ_img
 
 
-def render_floorplan(pose_graph: PoseGraph2d, scale_meters_per_coordinate: float) -> None:
+def render_floorplan(pose_graph: PoseGraph2d, scale_meters_per_coordinate: float, vis_camera: bool = True, vis_id: bool = True, vis_label: bool = True) -> None:
     """Given global poses, render the floorplan by rendering each room layout in the global coordinate frame.
 
     Args:
@@ -346,7 +387,8 @@ def render_floorplan(pose_graph: PoseGraph2d, scale_meters_per_coordinate: float
     """
     for i, pano_obj in pose_graph.nodes.items():
         pano_obj.plot_room_layout(
-            coord_frame="worldmetric", show_plot=False, scale_meters_per_coordinate=scale_meters_per_coordinate
+            coord_frame="worldmetric", show_plot=False, scale_meters_per_coordinate=scale_meters_per_coordinate, 
+            vis_camera=vis_camera, vis_id=vis_id, vis_label=vis_label
         )
 
 
