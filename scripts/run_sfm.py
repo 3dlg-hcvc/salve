@@ -488,6 +488,9 @@ def run_incremental_reconstruction(
                 est_floor_pose_graph = PoseGraph2d.from_wSi_list(wSi_list, gt_floor_pose_graph)
                 est_floor_pose_graphs.append(est_floor_pose_graph)
             
+            FloorReconstructionReport.visualize_all_set_floor_pose_graph_separately(
+                est_floor_pose_graphs, gt_floor_pose_graph, plot_save_dir=plot_save_dir)
+
             FloorReconstructionReport.visualize_all_set_floor_pose_graph(
                 est_floor_pose_graphs, gt_floor_pose_graph, plot_save_dir=plot_save_dir)
 
