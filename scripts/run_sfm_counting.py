@@ -463,10 +463,35 @@ def run_incremental_reconstruction(
                 inferred_floor_pose_graph=inferred_floor_pose_graph,
             )
             est_floor_pose_graph = PoseGraph2d.from_wSi_list(wSi_list, gt_floor_pose_graph)
-            report = FloorReconstructionReport.from_est_floor_pose_graph(
-                est_floor_pose_graph, gt_floor_pose_graph=gt_floor_pose_graph, plot_save_dir=plot_save_dir
-            )
-            reconstruction_reports.append(report)
+
+            def read_json(zind_root_dir, building_id, floor_id):
+                import json; import os.path as osp
+    
+                def label_iterator(label, floor_id):
+                    for complete_room_id, complete_room_data in label['merger'][floor_id].items():
+                        for partial_room_id, partial_room_data in complete_room_data.items():
+                            for pano_id, pano_data in partial_room_data.items():
+                                yield partial_room_id, pano_id, pano_data
+
+                json_path = osp.join(zind_root_dir, building_id, 'zind_data.json')
+                label = json.load(open(json_path))
+
+                room_pano_dict = {}
+                for partial_room_id, pano_id, pano_data in label_iterator(label, floor_id):
+                    room_id = partial_room_id.split('_')[-1]
+                    pano_id = pano_id.split('_')[-1]
+
+                    if room_id not in room_pano_dict:
+                        room_pano_dict[room_id] = [pano_id]
+                    else:
+                        room_pano_dict[room_id].append(pano_id)
+                return room_pano_dict
+
+            room_pano_dict = read_json(raw_dataset_dir, building_id, floor_id)
+            # report = FloorReconstructionReport.from_est_floor_pose_graph_counting(
+            #     est_floor_pose_graph, gt_floor_pose_graph=gt_floor_pose_graph, room_pano_dict=room_pano_dict, plot_save_dir=plot_save_dir
+            # )
+            # reconstruction_reports.append(report)
 
             #visualize all subgraphs
             est_floor_pose_subgraphs = []
@@ -487,12 +512,14 @@ def run_incremental_reconstruction(
                 )
                 est_floor_pose_subgraph = PoseGraph2d.from_wSi_list(wSi_list, gt_floor_pose_graph)
                 est_floor_pose_subgraphs.append(est_floor_pose_subgraph)
-            
+
+
             FloorReconstructionReport.visualize_all_set_floor_pose_graph_separately(
                 est_floor_pose_subgraphs, gt_floor_pose_graph, plot_save_dir=plot_save_dir)
 
-            FloorReconstructionReport.visualize_all_set_floor_pose_graph(
-                est_floor_pose_graph, est_floor_pose_subgraphs, gt_floor_pose_graph, plot_save_dir=plot_save_dir)
+            report = FloorReconstructionReport.visualize_all_set_floor_pose_graph_counting(
+                est_floor_pose_graph, est_floor_pose_subgraphs, gt_floor_pose_graph, room_pano_dict, plot_save_dir=plot_save_dir)
+            reconstruction_reports.append(report)
 
 
         elif method == "random_spanning_trees":
@@ -555,7 +582,7 @@ def run_incremental_reconstruction(
     if show_pdf_cdf:
         aggregate_cc_distributions(pdfs, cdfs)
 
-    floor_reconstruction_report.summarize_reports(reconstruction_reports)
+    floor_reconstruction_report.summarize_reports_counting(reconstruction_reports)
 
     print("Completed Eval with:")
     print(f"\tconfidence>={confidence_threshold}")

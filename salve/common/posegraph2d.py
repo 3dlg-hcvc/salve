@@ -323,7 +323,7 @@ class PoseGraph2d(NamedTuple):
         )
         return mean_rot_err, mean_trans_err, rot_errors, trans_errors
 
-    def align_by_Sim3_to_ref_pose_graph(self, ref_pose_graph: PoseGraph2d) -> PoseGraph2d:
+    def align_by_Sim3_to_ref_pose_graph(self, ref_pose_graph: PoseGraph2d):
         """
         TODO: should it be a class method?
         """

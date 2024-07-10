@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 
 import salve.dataset.hnet_prediction_loader as hnet_prediction_loader
@@ -39,13 +40,149 @@ class FloorReconstructionReport:
     rotation_errors: Optional[np.ndarray] = None
     translation_errors: Optional[np.ndarray] = None
 
+    percent_rooms_localized: Optional[float] = np.nan
+    
+    percent_panos_localized_on_all_subgraphs: Optional[float] = np.nan
+    percent_rooms_localized_on_all_subgraphs: Optional[float] = np.nan
+
     def __repr__(self) -> str:
         """Concise summary of the class as a string."""
         summary_str = f"Abs. Rot err (deg) {self.avg_abs_rot_err:.1f}, "
         summary_str += f"Abs. trans err {self.avg_abs_trans_err:.2f}, "
-        summary_str += f"%Localized {self.percent_panos_localized:.2f},"
+        summary_str += f"%Pano Localized {self.percent_panos_localized:.2f},"
         summary_str += f"Floorplan IoU {self.floorplan_iou:.2f}"
+        if self.perecnet_panos_localized_on_all_subgraphs is not np.nan:
+            summary_str += f", %Pano Localized on all subgraphs {self.perecnet_panos_localized_on_all_subgraphs:.2f}"
+
+        if self.percent_rooms_localized is not np.nan:
+            summary_str += f", %Room Localized {self.percent_rooms_localized:.2f}"
+        if self.perecnet_rooms_localized_on_all_subgraphs is not np.nan:
+            summary_str += f", %Room Localized on all subgraphs {self.perecnet_rooms_localized_on_all_subgraphs:.2f}"
+
         return summary_str
+
+
+    @classmethod
+    def get_room_localization(cls, room_pano_dict, pano_list):
+        def get_room_lst_from_pano_lst(room_pano_dict, pano_list):
+            room_list = []
+            for room_id, pano_ids in room_pano_dict.items():
+                if any([int(pano_id) in pano_list for pano_id in pano_ids]) and room_id not in room_list:
+                    room_list.append(room_id)
+            return room_list
+        room_list = get_room_lst_from_pano_lst(room_pano_dict, pano_list)
+        all_room_list = room_pano_dict.keys()
+        num = sum(i in all_room_list for i in room_list)    
+
+        return num, len(all_room_list)
+
+    @classmethod
+    def from_est_floor_pose_graph_counting(
+        cls,
+        est_floor_pose_graph: PoseGraph2d,
+        gt_floor_pose_graph: PoseGraph2d,
+        room_pano_dict: dict,
+        plot_save_dir: str,
+        plot_save_fpath: Optional[str] = None,
+        raw_dataset_dir: Optional[str] = None,
+    ) -> "FloorReconstructionReport":
+        """Create a report from an estimated pose graph for a single floor.
+
+        Note: estimated global poses will be saved to JSON at {plot_save_dir}_serialized/*.json.
+
+        Args:
+            est_floor_pose_graph: estimated pose graph for a specific ZInD building floor.
+            gt_floor_pose_graph: ground truth pose graph for the same ZInD building floor.
+            plot_save_dir: path to directory where visualization will be saved.
+            plot_save_fpath: TODO
+
+        Returns:
+            Report with accuracy results for estimated floorplan.
+        """
+        num_localized_panos = len(est_floor_pose_graph.nodes)
+        num_floor_panos = len(gt_floor_pose_graph.nodes)
+        percent_panos_localized = num_localized_panos / num_floor_panos * 100
+        print(f"Panos Localized {percent_panos_localized:.2f}% of panos: {num_localized_panos} / {num_floor_panos}")
+
+        est_floor_graph_panos = list(est_floor_pose_graph.nodes.keys())
+        est_graph_rooms_num, gt_room_num, est_graph_room_localization =\
+            cls.get_room_localization(room_pano_dict, est_floor_graph_panos)
+        print(f"Rooms Localized: {est_graph_room_localization:.2f}% of rooms: {est_graph_rooms_num} / {gt_room_num}")
+
+        # aligned_est_floor_pose_graph = est_floor_pose_graph
+        aligned_est_floor_pose_graph, _ = est_floor_pose_graph.align_by_Sim3_to_ref_pose_graph(
+            ref_pose_graph=gt_floor_pose_graph
+        )
+        (
+            mean_abs_rot_err,
+            mean_abs_trans_err,
+            rot_errors,
+            trans_errors,
+        ) = aligned_est_floor_pose_graph.measure_aligned_abs_pose_error(gt_floor_pg=gt_floor_pose_graph)
+
+        # Convert units to meters.
+        worldmetric_s_worldnormalized = gt_floor_pose_graph.scale_meters_per_coordinate
+        mean_abs_trans_err_m = worldmetric_s_worldnormalized * mean_abs_trans_err
+        print(f"Mean rotation error: {mean_abs_rot_err:.2f}, Mean translation error: {mean_abs_trans_err_m:.2f}")
+
+        serialize_predicted_pose_graph(aligned_est_floor_pose_graph, gt_floor_pose_graph, plot_save_dir)
+
+        render_floorplans_side_by_side(
+            est_floor_pose_graph=aligned_est_floor_pose_graph,
+            show_plot=False,
+            save_plot=True,
+            plot_save_dir=plot_save_dir,
+            gt_floor_pg=gt_floor_pose_graph,
+            plot_save_fpath=plot_save_fpath,
+        )
+
+        floorplan_iou = render_raster_occupancy(
+            est_floor_pose_graph=aligned_est_floor_pose_graph,
+            gt_floor_pg=gt_floor_pose_graph,
+            plot_save_dir=plot_save_dir,
+        )
+
+        render_inferred = False
+        if render_inferred:
+            if raw_dataset_dir is None:
+                raise ValueError("Path to directory root of ZInD dataset must be provided.")
+            # Load up the inferred pose graph.
+            floor_pose_graphs = hnet_prediction_loader.load_inferred_floor_pose_graphs(
+                query_building_id=gt_floor_pose_graph.building_id, raw_dataset_dir=raw_dataset_dir
+            )
+            inferred_floor_pose_graph = floor_pose_graphs[gt_floor_pose_graph.floor_id]
+
+            # Combine the inferred and GT pose graph elements.
+            inferred_aligned_pg = PoseGraph2d.from_aligned_est_poses_and_inferred_layouts(
+                aligned_est_floor_pose_graph, inferred_floor_pose_graph
+            )
+            render_floorplans_side_by_side(
+                est_floor_pose_graph=inferred_aligned_pg,
+                show_plot=False,
+                save_plot=True,
+                plot_save_dir=plot_save_dir + "_inferred",
+                gt_floor_pg=gt_floor_pose_graph,
+                plot_save_fpath=plot_save_fpath,
+            )
+
+            render_rasterized_room_clustering(
+                inferred_aligned_pg,
+                plot_save_dir=plot_save_dir + "_clustering",
+                scale_meters_per_coordinate=gt_floor_pose_graph.scale_meters_per_coordinate,
+            )
+
+        print()
+        print()
+
+        return cls(
+            avg_abs_rot_err=mean_abs_rot_err,
+            avg_abs_trans_err=mean_abs_trans_err_m,
+            percent_panos_localized=percent_panos_localized,
+            percent_rooms_localized=est_graph_room_localization,
+            floorplan_iou=floorplan_iou,
+            rotation_errors=rot_errors,
+            translation_errors=trans_errors,
+        )
 
     @classmethod
     def from_est_floor_pose_graph(
@@ -148,14 +285,150 @@ class FloorReconstructionReport:
             translation_errors=trans_errors,
         )
 
+
+    @classmethod
+    def visualize_all_set_floor_pose_graph_counting(
+        cls,
+        largest_floor_pose_graph: PoseGraph2d,
+        est_floor_pose_graphs: List[PoseGraph2d],
+        gt_floor_pose_graph: PoseGraph2d,
+        room_pano_dict: dict,
+        plot_save_dir: str,
+        plot_save_fpath: Optional[str] = None,
+    ) -> "FloorReconstructionReport":
+
+
+        num_localized_panos = len(largest_floor_pose_graph.nodes)
+        num_floor_panos = len(gt_floor_pose_graph.nodes)
+        percent_panos_localized = num_localized_panos / num_floor_panos * 100
+        print(f"Panos Localized {percent_panos_localized:.2f}% of panos: {num_localized_panos} / {num_floor_panos}")
+
+        est_floor_graph_panos = list(largest_floor_pose_graph.nodes.keys())
+        largest_graph_rooms_num, gt_room_num=\
+            cls.get_room_localization(room_pano_dict, est_floor_graph_panos)
+        ratio_rooms_localized = largest_graph_rooms_num / gt_room_num
+        percent_rooms_localized = ratio_rooms_localized * 100
+        print(f"Rooms Localized: {percent_rooms_localized:.2f}% of rooms: {largest_graph_rooms_num} / {gt_room_num}")
+
+        # aligned_est_floor_pose_graph = est_floor_pose_graph
+        aligned_largest_floor_pose_graph, _ = largest_floor_pose_graph.align_by_Sim3_to_ref_pose_graph(
+            ref_pose_graph=gt_floor_pose_graph
+        )
+        (
+            mean_abs_rot_err,
+            mean_abs_trans_err,
+            rot_errors,
+            trans_errors,
+        ) = aligned_largest_floor_pose_graph.measure_aligned_abs_pose_error(gt_floor_pg=gt_floor_pose_graph)
+
+        # Convert units to meters.
+        worldmetric_s_worldnormalized = gt_floor_pose_graph.scale_meters_per_coordinate
+        mean_abs_trans_err_m = worldmetric_s_worldnormalized * mean_abs_trans_err
+        print(f"Mean rotation error: {mean_abs_rot_err:.2f}, Mean translation error: {mean_abs_trans_err_m:.2f}")
+
+        serialize_predicted_pose_graph(aligned_largest_floor_pose_graph, gt_floor_pose_graph, plot_save_dir)
+
+        render_floorplans_side_by_side(
+            est_floor_pose_graph=aligned_largest_floor_pose_graph,
+            show_plot=False,
+            save_plot=True,
+            plot_save_dir=plot_save_dir,
+            gt_floor_pg=gt_floor_pose_graph,
+            plot_save_fpath=plot_save_fpath,
+        )
+        floorplan_iou = render_raster_occupancy(
+            est_floor_pose_graph=aligned_largest_floor_pose_graph,
+            gt_floor_pg=gt_floor_pose_graph,
+            plot_save_dir=plot_save_dir,
+        )
+
+
+        aligned_est_floor_pose_graphs = []
+        all_graph_panos = []
+        for est_floor_pose_graph in est_floor_pose_graphs:
+
+            graph_panos = list(est_floor_pose_graph.nodes.keys())
+            for pano_id in graph_panos:
+                if pano_id not in all_graph_panos:
+                    all_graph_panos.append(pano_id)
+
+            aligned_est_floor_pose_graph, _ = est_floor_pose_graph.align_by_Sim3_to_ref_pose_graph(
+                ref_pose_graph=gt_floor_pose_graph
+            )
+            aligned_est_floor_pose_graphs.append(aligned_est_floor_pose_graph)
+
+        all_graph_rooms_num, _ = cls.get_room_localization(room_pano_dict, all_graph_panos)
+        ratio_rooms_localized_on_all_subgraphs = all_graph_rooms_num / gt_room_num 
+        percent_rooms_localized_on_all_subgraphs = ratio_rooms_localized_on_all_subgraphs * 100
+
+        percent_panos_localized_on_all_subgraphs = len(all_graph_panos) / num_floor_panos * 100
+
+        building_id = gt_floor_pose_graph.building_id
+        floor_id = gt_floor_pose_graph.floor_id
+
+        plt.suptitle("Left: GT floorplan. Righttop: biggest estimated floorplan. \n Rightbottom: all estimated floorplans.\n")
+
+        ax1 = plt.subplot(2, 2, 1)
+        render_floorplan(gt_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                        vis_camera=False, vis_id=False, vis_label=False)
+        ax1.set_aspect("equal")
+        # matplotlib_utils.legend_without_duplicate_labels(ax1)
+
+        ax2 = plt.subplot(2, 2, 2, sharex=ax1, sharey=ax1)
+        render_floorplan(aligned_largest_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                        vis_camera=False, vis_id=False, vis_label=False)
+        ax2.set_aspect("equal")
+        plt.setp(ax2.get_xticklabels(), visible=False)
+        plt.title(f"rooms: {largest_graph_rooms_num}, ratio: {ratio_rooms_localized:.2f}", y=-0.01, pad=-15)
+        
+        ax3 = plt.subplot(2, 2, 3, sharex=ax1, sharey=ax1)
+        render_floorplan(gt_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                        vis_camera=False, vis_id=False, vis_label=False)
+        ax3.set_aspect("equal")
+        plt.setp(ax3.get_xticklabels(), visible=False)
+        plt.title(f"Building {building_id}, {floor_id}, rooms: {gt_room_num}", y=-0.01, pad=-15)
+        # matplotlib_utils.legend_without_duplicate_labels(ax1)
+
+        ax4 = plt.subplot(2, 2, 4, sharex=ax1, sharey=ax1)
+        for i, aligned_est_floor_pose_graph in enumerate(aligned_est_floor_pose_graphs):
+            render_floorplan(aligned_est_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                            vis_camera=False, vis_id=False, vis_label=False)
+        ax4.set_aspect("equal")
+        plt.setp(ax4.get_xticklabels(), visible=False)
+        plt.title(f"rooms: {all_graph_rooms_num}, ratio: {ratio_rooms_localized_on_all_subgraphs:.2f}", y=-0.01, pad=-15)
+            # matplotlib_utils.legend_without_duplicate_labels(ax)
+
+        os.makedirs(plot_save_dir, exist_ok=True)
+        save_fpath = f"{plot_save_dir}/{building_id}_{floor_id}_all.jpg"
+
+        plt.savefig(save_fpath, dpi=500)
+        plt.close("all")
+
+        return cls(
+            avg_abs_rot_err=mean_abs_rot_err,
+            avg_abs_trans_err=mean_abs_trans_err_m,
+            percent_panos_localized=percent_panos_localized,
+            percent_panos_localized_on_all_subgraphs=percent_panos_localized_on_all_subgraphs,
+            percent_rooms_localized=percent_rooms_localized,
+            percent_rooms_localized_on_all_subgraphs=percent_rooms_localized_on_all_subgraphs,
+            floorplan_iou=floorplan_iou,
+            rotation_errors=rot_errors,
+            translation_errors=trans_errors,
+        )
+
     @classmethod
     def visualize_all_set_floor_pose_graph(
         cls,
+        largest_floor_pose_graph: PoseGraph2d,
         est_floor_pose_graphs: List[PoseGraph2d],
         gt_floor_pose_graph: PoseGraph2d,
         plot_save_dir: str,
     ):
         
+        aligned_largest_floor_pose_graph, _ = largest_floor_pose_graph.align_by_Sim3_to_ref_pose_graph(
+            ref_pose_graph=gt_floor_pose_graph
+        )
+
         aligned_est_floor_pose_graphs = []
 
         for est_floor_pose_graph in est_floor_pose_graphs:
@@ -167,18 +440,30 @@ class FloorReconstructionReport:
         building_id = gt_floor_pose_graph.building_id
         floor_id = gt_floor_pose_graph.floor_id
 
-        plt.suptitle("leftmost: GT floorplan. Right: estimated floorplans.")
-        ax1 = plt.subplot(1, 2, 1)
+        plt.suptitle("Lefttop: GT floorplan. Righttop: biggest estimated floorplan. \nLeftbottom: GT floorplan. Rightbottom: all estimated floorplans.")
+
+        ax1 = plt.subplot(2, 2, 1)
         render_floorplan(gt_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
                         vis_camera=False, vis_id=False, vis_label=False)
         ax1.set_aspect("equal")
         # matplotlib_utils.legend_without_duplicate_labels(ax1)
 
-        ax2 = plt.subplot(1, 2, 2, sharex=ax1, sharey=ax1)
+        ax2 = plt.subplot(2, 2, 2, sharex=ax1, sharey=ax1)
+        render_floorplan(aligned_largest_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                        vis_camera=False, vis_id=False, vis_label=False)
+        ax2.set_aspect("equal")
+        
+        ax3 = plt.subplot(2, 2, 3, sharex=ax1, sharey=ax1)
+        render_floorplan(gt_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
+                        vis_camera=False, vis_id=False, vis_label=False)
+        ax3.set_aspect("equal")
+        # matplotlib_utils.legend_without_duplicate_labels(ax1)
+
+        ax4 = plt.subplot(2, 2, 4, sharex=ax1, sharey=ax1)
         for i, aligned_est_floor_pose_graph in enumerate(aligned_est_floor_pose_graphs):
             render_floorplan(aligned_est_floor_pose_graph, gt_floor_pose_graph.scale_meters_per_coordinate, \
                             vis_camera=False, vis_id=False, vis_label=False)
-        ax2.set_aspect("equal")
+        ax4.set_aspect("equal")
         plt.title(f"Building {building_id}, {floor_id}")
             # matplotlib_utils.legend_without_duplicate_labels(ax)
 
@@ -433,6 +718,38 @@ def render_floorplan(pose_graph: PoseGraph2d, scale_meters_per_coordinate: float
             coord_frame="worldmetric", show_plot=False, scale_meters_per_coordinate=scale_meters_per_coordinate, 
             vis_camera=vis_camera, vis_id=vis_id, vis_label=vis_label
         )
+
+def summarize_reports_counting(reconstruction_reports: List[FloorReconstructionReport]) -> None:
+    """Given a report per floor, compute summary statistics for each error metric.
+
+    Args:
+        reconstruction_reports: report for every floor of each ZinD building in this split.
+    """
+    print()
+    print()
+    print(f"Test set contained {len(reconstruction_reports)} total floors.")
+    if len(reconstruction_reports) == 0:
+        print("Cannot compute error metrics, tested over zero homes.")
+        return
+
+    error_metrics = ["avg_abs_rot_err", "avg_abs_trans_err",
+                     "percent_panos_localized", "percent_panos_localized_on_all_subgraphs",
+                     "percent_rooms_localized", "percent_rooms_localized_on_all_subgraphs",
+                     "floorplan_iou"]
+    for error_metric in error_metrics:
+        avg_val = np.nanmean([getattr(r, error_metric) for r in reconstruction_reports])
+        print(f"Averaged over all tours, {error_metric} = {avg_val:.3f}")
+
+        median_val = np.nanmedian([getattr(r, error_metric) for r in reconstruction_reports])
+        print(f"Median over all tours, {error_metric} = {median_val:.3f}")
+
+    # thresholded_trans_error_dict = {}
+    # thresholded_trans_error_dict[0.2] = compute_translation_errors_against_threshold(reconstruction_reports, threshold=0.2)
+    # thresholded_trans_error_dict[0.6] = compute_translation_errors_against_threshold(reconstruction_reports, threshold=0.6)
+    # thresholded_trans_error_dict[1.0] = compute_translation_errors_against_threshold(reconstruction_reports, threshold=1.0)
+
+    # print("Average position localization success rates: ", thresholded_trans_error_dict)
+    print("======> Evaluation complete. ======>")
 
 
 def summarize_reports(reconstruction_reports: List[FloorReconstructionReport]) -> None:

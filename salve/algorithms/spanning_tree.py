@@ -88,7 +88,7 @@ def greedily_construct_all_st_Sim2(
 
     connected_ccs = sorted(nx.connected_components(input_graph), key=len, reverse=True)
     for cc in connected_ccs:
-        subgraph = input_graph.subgraph(cc).copy()
+        subgraph = input_graph.copy().subgraph(cc).copy()
         cc_nodes_list.append(list(subgraph.nodes()))
 
     wSi_lists = []
